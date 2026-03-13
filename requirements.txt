@@ -8,3 +8,4 @@ networkx
 matplotlib
 Cython==0.29.36
 implicit
+geatpy
