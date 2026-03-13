@@ -1,0 +1,10 @@
+numpy==1.23.5
+pandas
+tqdm
+scikit-learn
+scipy
+torch
+networkx
+matplotlib
+Cython==0.29.36
+implicit
