@@ -1,20 +1,31 @@
-#replace recombination function code withh given recombination function for improvement
+import numpy as np
+import random
+from collections import Counter
+
+def indexA(L, val):
+    return [i for i, v in enumerate(L) if v == val]
 
 def recombination(pop, moea):
-
-    def get_genres(item):
-        try:
-            return set(moea.Si['genre'][item].split(moea.si_spilt))
-        except:
-            return set()
-
+    alpha = 0.7
+    beta = 0.3
+    lam = 1.0
+    
     pop_list = list(range(pop.shape[0]))
 
-    while len(pop_list) != 0:
+    def compute_contextual_embedding(items):
+        embeddings = [moea.item_embeddings[item] for item in items]
+        return np.mean(embeddings, axis=0)
 
+    def cosine_similarity(v1, v2):
+        norm1 = np.linalg.norm(v1)
+        norm2 = np.linalg.norm(v2)
+        if norm1 == 0 or norm2 == 0:
+            return 0
+        return np.dot(v1, v2) / (norm1 * norm2)
+
+    while len(pop_list) >= 2:
         tmp1 = random.choice(pop_list)
         pop_list.remove(tmp1)
-
         tmp2 = random.choice(pop_list)
         pop_list.remove(tmp2)
 
@@ -22,54 +33,53 @@ def recombination(pop, moea):
         y2 = pop[tmp2].copy()
 
         if np.random.rand() < 0.9:
+            u = random.randint(0, len(y1) - 2)
+            v = random.randint(u + 1, len(y1))
+            y1[u:v], y2[u:v] = y2[u:v].copy(), y1[u:v].copy()
 
-            u = random.randint(0, 1)
-            v = random.randint(3, 4)
-
-            tmp = y1[u:v].copy()
-            y1[u:v] = y2[u:v]
-            y2[u:v] = tmp
-
-            for child in [y1, y2]:
-
-                if len(set(child)) != moea.n_rec_movie:
-
-                    current_genres = set()
-                    for item in child:
-                        current_genres |= get_genres(item)
-
-                    duplicates = [x for x, count in Counter(child).items() if count > 1]
-
-                    for dup in duplicates:
-
-                        indices = indexA(child, dup)
-
-                        for idx in indices[1:]:
-
-                            candidates = list(set(moea.candidate).difference(child))
-
-                            if len(candidates) == 0:
-                                continue
-
-                            best_item = None
-                            best_score = -1
-
-                            for c in candidates:
-
-                                genres = get_genres(c)
-
-                                new_genre = len(genres - current_genres) > 0
-                                semantic_bonus = 0.5 if new_genre else 0
-
-                                if semantic_bonus > best_score:
-                                    best_score = semantic_bonus
-                                    best_item = c
-
+        for child_idx, child in enumerate([y1, y2]):
+            user_idx = tmp1 if child_idx == 0 else tmp2
+            
+            if len(set(child)) != moea.n_rec_movie:
+                psi_x = compute_contextual_embedding(child)
+                counts = Counter(child)
+                duplicates = [item for item, count in counts.items() if count > 1]
+                
+                for dup in duplicates:
+                    indices = indexA(child.tolist(), dup)
+                    for idx in indices[1:]:
+                        all_genres = list(moea.genre_embeddings.keys())
+                        probs = []
+                        for g_name in all_genres:
+                            g_emb = moea.genre_embeddings[g_name]
+                            alignment = cosine_similarity(psi_x, g_emb)
+                            probs.append(np.exp(-lam * alignment))
+                        
+                        probs = np.array(probs) / np.sum(probs)
+                        genre_star = np.random.choice(all_genres, p=probs)
+                        
+                        candidates = list(set(moea.genre_items[genre_star]).difference(set(child)))
+                        if not candidates:
+                            candidates = list(set(moea.candidate).difference(set(child)))
+                        
+                        best_item = None
+                        max_score = -float('inf')
+                        
+                        for c in candidates:
+                            e_c = moea.item_embeddings[c]
+                            sim_c_x = cosine_similarity(e_c, psi_x)
+                            r_uc = moea.predicted_ratings[user_idx][c]
+                            score = alpha * r_uc + beta * (1 - sim_c_x)
+                            
+                            if score > max_score:
+                                max_score = score
+                                best_item = c
+                        
+                        if best_item is not None:
                             child[idx] = best_item
-                            current_genres |= get_genres(best_item)
+                            psi_x = compute_contextual_embedding(child)
 
         pop[tmp1] = y1
         pop[tmp2] = y2
 
     return pop
-
